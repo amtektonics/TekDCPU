@@ -5,11 +5,22 @@ using UnityEngine;
 public class DCPU : MonoBehaviour {
     public static int MEM_SIZE = 0x10000;
     public static int REG_SIZE = 0x8;
-    ushort aRef, bRef;
-    ushort aMode, bMode;
+    //
+    public static int A_REG = 0;
+    public static int B_REG = 1;
+    public static int C_REG = 2;
+    public static int X_REG = 3;
+    public static int Y_REG = 4;
+    public static int Z_REG = 5;
+    public static int I_REG = 6;
+    public static int J_REG = 7;
 
-    public enum varMode {MEM_MODE, REG_MODE, LIT_MODE, PC_MODE, SP_MODE, EX_MODE};
-    public enum opCodes {spi, SET, ADD, SUB, MUL, MLI, DIV, DVI, MOD, MDI, AND, BOR, XOR, SHR, ASR, SHL, IFB, IFC, IFN, IFG, IFA, IFL, IFU, NU18, NU19, ADX, NU1C, NU1D, STI, STD}
+    //
+    private ushort aRef, bRef; // the ref modes are used to store the memory or register index for final processing
+    private ushort aMode, bMode; // the modes are used to store the current mode of the operation variable
+    //
+    private enum varMode {MEM_MODE, REG_MODE, LIT_MODE, PC_MODE, SP_MODE, EX_MODE};
+    private enum opCodes {spi, SET, ADD, SUB, MUL, MLI, DIV, DVI, MOD, MDI, AND, BOR, XOR, SHR, ASR, SHL, IFB, IFC, IFE, IFN, IFG, IFA, IFL, IFU, NU18, NU19, ADX, SBX, NU1C, NU1D, STI, STD}
 
     // takes the current dcpu state 
     // moves it one cycle forward
@@ -32,8 +43,7 @@ public class DCPU : MonoBehaviour {
             ushort a = handleVar(state, aa, nxtA, false);
             ushort b = handleVar(state, bb, nxtB, true);
             handleOpCode(state, op, b, a);
-        }
-        else{
+        }else{
             
         }
         tick(state);
@@ -42,6 +52,7 @@ public class DCPU : MonoBehaviour {
 
 
 
+    //helper functions for basic op codes
     private ushort handleVar(dcpuState state, ushort value, ushort nxtVar, bool isB){
         if(value <= 0x07){ // register (A, B, C, X, Y, Z, I, J)
             if (isB){
@@ -132,12 +143,12 @@ public class DCPU : MonoBehaviour {
         }
         return 0;
     }
-    
     private void handleOpCode(dcpuState state, ushort op, ushort b, ushort a){
 
         ushort res = 0; // temp container for result
         bool needsProcessing = true; // this will only be true if data needs to be stored back to the dcpu
-        switch(op){
+        ushort amt = 0; //used for calculating the skip length of the dcpu's if statements
+        switch (op){
             case (ushort)opCodes.SET: //sets b to a
                 res = a;
                 tick(state);
@@ -223,13 +234,84 @@ public class DCPU : MonoBehaviour {
                 tick(state);
                 break;
 
-            case (ushort)opCodes.IFB: // 
-                ushort amt = ifJumpNum(state);
+            case (ushort)opCodes.IFB: // processes the next instruction if binary and'ing dosen't equal 
+                amt = ifJumpNum(state);
                 if((b & a) == 0) { state.PC += amt; tick(state, amt);}
-                tick(state);
+                tick(state, 2);
                 needsProcessing = false;
                 break;
 
+            case (ushort)opCodes.IFC:// processes the next instruction if binary and'ing equal 0
+                amt = ifJumpNum(state);
+                if ((b & a) != 0) { state.PC += amt; tick(state, amt); }
+                tick(state, 2);
+                needsProcessing = false;
+                break;
+
+            case (ushort)opCodes.IFE:// processes the next instruction if a and b are equal
+                amt = ifJumpNum(state);
+                if(b != a) { state.PC += amt; tick(state, amt); }
+                tick(state, 2);
+                needsProcessing = false;
+                break;
+            case (ushort)opCodes.IFN: // processes the next instruction if a and b are not equal
+                amt = ifJumpNum(state);
+                if (b == a) { state.PC += amt; tick(state, amt); }
+                tick(state, 2);
+                needsProcessing = false;
+                break;
+
+            case (ushort)opCodes.IFG: // processes the next instruction if b is greater than a (unsigned)
+                amt = ifJumpNum(state);
+                if (b < a) { state.PC += amt; tick(state, amt); }
+                tick(state, 2);
+                needsProcessing = false;
+                break;
+
+            case (ushort)opCodes.IFA: // processes the next instruction if b is greate than a (signed)
+                amt = ifJumpNum(state);
+                if ((short)b < (short)a) { state.PC += amt; tick(state, amt); }
+                tick(state, 2);
+                needsProcessing = false;
+                break;
+
+            case (ushort)opCodes.IFL: // processes the next instruction if b is less than a (unsigned)
+                amt = ifJumpNum(state);
+                if (b > a) { state.PC += amt; tick(state, amt); }
+                tick(state, 2);
+                needsProcessing = false;
+                break;
+
+            case (ushort)opCodes.IFU: // processes the next instruction if b is less than a (signed)
+                amt = ifJumpNum(state);
+                if ((short)b > (short)a) { state.PC += amt; tick(state, amt); }
+                tick(state, 2);
+                needsProcessing = false;
+                break;
+
+            case (ushort)opCodes.ADX: // sets b to b + a + EX and set EX to 0x0001 if there is an overflow otherwise EX = 0
+                res = (ushort)(b + a + state.EX);
+                if((int)(b + a + state.EX) > 0xffff) { state.EX = 1; }
+                else { state.EX = 0; }
+                break;
+
+            case (ushort)opCodes.SBX: // sets b to b - a + EX and set EX to 0xFFFF if there is an overflow otherwise EX = 0
+                res = (ushort)(b - a + state.EX);
+                if ((b - a + state.EX) < 0x0) { state.EX = 0xFFFF; }
+                else { state.EX = 0; }
+                break;
+
+            case (ushort)opCodes.STI: //sets a to b and adds one to the I and J reigsters
+                res = a;
+                ++state.registers[I_REG];
+                ++state.registers[J_REG];
+                break;
+
+            case (ushort)opCodes.STD: //sets a to b and subtracts one from the I and J reigsters
+                res = a;
+                --state.registers[I_REG];
+                --state.registers[J_REG];
+                break;
         }
         if(needsProcessing){
             if(bMode == (ushort)varMode.MEM_MODE){
@@ -248,6 +330,8 @@ public class DCPU : MonoBehaviour {
         }
     }
 
+    //helper functions for advanced op codes
+    private void handleSpecialOpCode(dcpuState state, ushort op, ushort a){}
     //utils
     private void tick(dcpuState state, int n = 1){
         state.ticks += n;
