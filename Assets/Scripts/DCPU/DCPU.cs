@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class DCPU : MonoBehaviour {
+public class DCPU{
     public static int MEM_SIZE = 0x10000;
     public static int REG_SIZE = 0x8;
     //
@@ -16,17 +16,18 @@ public class DCPU : MonoBehaviour {
     public static int J_REG = 7;
 
     //
-    private ushort aRef, bRef; // the ref modes are used to store the memory or register index for final processing
-    private ushort aMode, bMode; // the modes are used to store the current mode of the operation variable
+    private static ushort aRef, bRef; // the ref modes are used to store the memory or register index for final processing
+    private static ushort aMode, bMode; // the modes are used to store the current mode of the operation variable
     //
     private enum varMode {MEM_MODE, REG_MODE, LIT_MODE, PC_MODE, SP_MODE, EX_MODE};
     private enum opCodes {spi, SET, ADD, SUB, MUL, MLI, DIV, DVI, MOD, MDI, AND, BOR, XOR, SHR, ASR, SHL, IFB, IFC, IFE, IFN, IFG, IFA, IFL, IFU, NU18, NU19, ADX, SBX, NU1C, NU1D, STI, STD}
-    private enum spOpCodes {rfe, JSR, NU02, NU03, NU05, NU06, NU07, INT, IAG, IAS, RFI, IAQ, NU0D, NU0E, NU0F, HWN, HWQ, HWI};
+    private enum spOpCodes {rfe, JSR, NU02, NU03, NU04, NU05, NU06, NU07, INT, IAG, IAS, RFI, IAQ, NU0D, NU0E, NU0F, HWN, HWQ, HWI};
     // takes the current dcpu state 
     // moves it one cycle forward
     // and returns a  new state
-    public dcpuState step(dcpuState state){
-        dcpuState oldState = state.copy(); 
+    public static dcpuState step(dcpuState state){
+        aRef  = 0;  bRef = 0;
+        aMode = 0; bMode = 0;
         ushort addr = state.memory[state.PC++];
         ushort aa = (ushort)((addr >> 10) & 0x3F), bb = (ushort)((addr >> 5) & 0x1F), op = (ushort)((addr) & 0x1F);
         ushort nxtA = 0, nxtB = 0;
@@ -48,7 +49,7 @@ public class DCPU : MonoBehaviour {
                 nxtA = state.memory[state.PC++];
                 tick(state);
             }
-            ushort a = handleVar(state, aa, nxtA, false);
+            ushort a = handleSpecialVar(state, aa, nxtA);
             handleSpecialOpCode(state, bb, a);
         }
         tick(state);
@@ -58,7 +59,7 @@ public class DCPU : MonoBehaviour {
 
 
     //helper functions for basic op codes
-    private ushort handleVar(dcpuState state, ushort value, ushort nxtVar, bool isB){
+    private static ushort handleVar(dcpuState state, ushort value, ushort nxtVal, bool isB){
         if(value <= 0x07){ // register (A, B, C, X, Y, Z, I, J)
             if (isB){
                 bMode = (ushort)varMode.REG_MODE;
@@ -71,14 +72,14 @@ public class DCPU : MonoBehaviour {
                 bMode = (ushort)varMode.MEM_MODE;
                 bRef = state.registers[value % REG_SIZE];
             }
-            return state.memory[state.registers[value & REG_SIZE]];
+            return state.memory[state.registers[value % REG_SIZE]];
 
         }else if(value <= 0x17){ // [register + next word]
             if(isB){
                 bMode = (ushort)varMode.MEM_MODE;
-                bRef = (ushort)(state.registers[value % REG_SIZE] + nxtVar);
+                bRef = (ushort)(state.registers[value % REG_SIZE] + nxtVal);
             }
-            return state.memory[state.registers[value % REG_SIZE] + nxtVar];
+            return state.memory[state.registers[value % REG_SIZE] + nxtVal];
 
         }else if(value == 0x18){ // PUSH/[--SP] POP/[SP++]
             if(isB){
@@ -99,9 +100,9 @@ public class DCPU : MonoBehaviour {
         }else if(value == 0x1A){ // [SP + next word] / PICK n
             if(isB){
                 bMode = (ushort)varMode.MEM_MODE;
-                bRef = (ushort)(state.SP + nxtVar);
+                bRef = (ushort)(state.SP + nxtVal);
             }
-            return state.memory[state.SP + nxtVar];
+            return state.memory[state.SP + nxtVal];
 
         }else if(value == 0x1B){ // SP
             if(isB){
@@ -127,16 +128,16 @@ public class DCPU : MonoBehaviour {
         }else if(value == 0x1E){ // [next word]
             if(isB){
                 bMode = (ushort)varMode.MEM_MODE;
-                bRef = nxtVar;
+                bRef = nxtVal;
             }
-            return state.memory[nxtVar];
+            return state.memory[nxtVal];
 
         }else if(value == 0x1F){ // next word (lit)
             if(isB){
                 bMode = (ushort)varMode.LIT_MODE;
-                bRef = nxtVar;
+                bRef = nxtVal;
             }
-            return nxtVar;
+            return nxtVal;
         }else if(value >= 0x20 && value <= 0x3F){
             if (isB){
                 bMode = (ushort)varMode.LIT_MODE;
@@ -144,11 +145,11 @@ public class DCPU : MonoBehaviour {
             }
             return (ushort)(value - 33);
         }else{
-            //this is for if the a or b variable exceeds its boudns 
+            //this is for if the a or b variable exceeds its bounds
         }
         return 0;
     }
-    private void handleOpCode(dcpuState state, ushort op, ushort b, ushort a){
+    private static void handleOpCode(dcpuState state, ushort op, ushort b, ushort a){
 
         ushort res = 0; // temp container for result
         bool needsProcessing = true; // this will only be true if data needs to be stored back to the dcpu
@@ -161,7 +162,7 @@ public class DCPU : MonoBehaviour {
 
             case (ushort)opCodes.ADD: //add b and a together and stores it in b
                 res = (ushort)(b + a);
-                state.EX = (ushort)((b + a) % 0xFFFF);
+                if((b + a) > 0xFFFF){state.EX = (ushort)((b + a) % 0xFFFF);}
                 tick(state, 2);
                 break;
 
@@ -336,7 +337,7 @@ public class DCPU : MonoBehaviour {
     }
 
     //helper functions for advanced op codes
-    private void handleSpecialOpCode(dcpuState state, ushort op, ushort a){
+    private static void handleSpecialOpCode(dcpuState state, ushort op, ushort a){
         bool needsProcessing = false;
         ushort res = 0;
         switch (op){
@@ -387,52 +388,129 @@ public class DCPU : MonoBehaviour {
                 break;
 
             case (ushort)spOpCodes.HWQ:
-                //id
-                state.registers[DCPU.A_REG] = (ushort)(state.peripherals[a].id & 0xFFFF);
-                state.registers[DCPU.B_REG] = (ushort)((state.peripherals[a].id >> 16) & 0xFFFF);
-                //version
-                state.registers[DCPU.C_REG] = (ushort)(state.peripherals[a].version);
-                //manufacturer
-                state.registers[DCPU.X_REG] = (ushort)(state.peripherals[a].manufacturer & 0xFFFF);
-                state.registers[DCPU.Y_REG] = (ushort)((state.peripherals[a].manufacturer >> 16) & 0xFFFF);
+                if(a < state.peripherals.Count){
+                    //id
+                    state.registers[DCPU.A_REG] = (ushort)(state.peripherals[a].id & 0xFFFF);
+                    state.registers[DCPU.B_REG] = (ushort)((state.peripherals[a].id >> 16) & 0xFFFF);
+                    //version
+                    state.registers[DCPU.C_REG] = (ushort)(state.peripherals[a].version);
+                    //manufacturer
+                    state.registers[DCPU.X_REG] = (ushort)(state.peripherals[a].manufacturer & 0xFFFF);
+                    state.registers[DCPU.Y_REG] = (ushort)((state.peripherals[a].manufacturer >> 16) & 0xFFFF);
+                }
                 tick(state, 4);
                 break;
 
             case (ushort)spOpCodes.HWI:
-                state.peripherals[a].sendInterrupt(state);
+                if(a < state.peripherals.Count){
+                    state.peripherals[a].sendInterrupt(state);
+                }
                 tick(state, 4);
                 break;
         }
         if (needsProcessing){
-            if (bMode == (ushort)varMode.MEM_MODE){
-                state.memory[bRef] = res;
-            }else if (bMode == (ushort)varMode.REG_MODE){
-                state.registers[bRef] = res;
-            }else if (bMode == (ushort)varMode.PC_MODE){
+            if (aMode == (ushort)varMode.MEM_MODE){
+                state.memory[aRef] = res;
+            }else if (aMode == (ushort)varMode.REG_MODE){
+                state.registers[aRef] = res;
+            }else if (aMode == (ushort)varMode.PC_MODE){
                 state.PC = res;
-            }else if (bMode == (ushort)varMode.SP_MODE){
+            }else if (aMode == (ushort)varMode.SP_MODE){
                 state.SP = res;
-            }else if (bMode == (ushort)varMode.EX_MODE){
+            }else if (aMode == (ushort)varMode.EX_MODE){
                 state.EX = res;
             }else{}
         }
     }
+    private static ushort handleSpecialVar(dcpuState state, ushort value, ushort nxtVal){
+        if (value <= 0x07){ // register (A, B, C, X, Y, Z, I, J)
+            aMode = (ushort)varMode.REG_MODE;
+            aRef = value;
+            return state.registers[value];
+
+        }
+        else if (value <= 0x0F){ // [register]
+            aMode = (ushort)varMode.MEM_MODE;
+            aRef = state.registers[value % REG_SIZE];
+            return state.memory[state.registers[value % REG_SIZE]];
+
+        }
+        else if (value <= 0x17){ // [register + next word]
+            aMode = (ushort)varMode.MEM_MODE;
+            aRef = (ushort)(state.registers[value % REG_SIZE] + nxtVal);
+            return state.memory[state.registers[value % REG_SIZE] + nxtVal];
+
+        }
+        else if (value == 0x18){ // PUSH/[--SP] POP/[SP++]
+            aMode = (ushort)varMode.MEM_MODE;
+            aRef = state.SP++;
+            return state.memory[aRef];
+        }
+        else if (value == 0x19){ // [SP] / PEEK
+            aMode = (ushort)varMode.MEM_MODE;
+            aRef = state.SP;
+            return state.memory[state.SP];
+
+        }
+        else if (value == 0x1A){ // [SP + next word] / PICK n
+            aMode = (ushort)varMode.MEM_MODE;
+            aRef = (ushort)(state.SP + nxtVal);
+            return state.memory[state.SP + nxtVal];
+
+        }
+        else if (value == 0x1B){ // SP  
+            aMode = (ushort)varMode.SP_MODE;
+            aRef = state.SP;
+            return state.SP;
+
+        }
+        else if (value == 0x1C){ // PC
+            aMode = (ushort)varMode.PC_MODE;
+            aRef = state.PC;
+            return state.PC;
+
+        }
+        else if (value == 0x1D){ // EX
+            aMode = (ushort)varMode.EX_MODE;
+            aRef = state.EX;
+            return state.EX;
+
+        }
+        else if (value == 0x1E){ // [next word]
+            aMode = (ushort)varMode.MEM_MODE;
+            aRef = nxtVal;
+            return state.memory[nxtVal];
+
+        }
+        else if (value == 0x1F){ // next word (lit)
+            aMode = (ushort)varMode.LIT_MODE;
+            aRef = nxtVal;
+            return nxtVal;
+        }
+        else if (value >= 0x20 && value <= 0x3F){
+            aMode = (ushort)varMode.LIT_MODE;
+            aRef = (ushort)(value - 33);
+            return (ushort)(value - 33);
+        }else{
+            //this is for if the a or b variable exceeds its boudns 
+        }
+        return 0;
+    }    
     //utils
-    private void tick(dcpuState state, int n = 1){
+    private static void tick(dcpuState state, int n = 1){
         state.ticks += n;
     }
 
-    private bool needsNextVar(ushort value){
-        if ((value >= 0x10 && value < 0x17) || value == 0xA1 || value == 0x1E || value == 0x1F)
-        {
+    private static bool needsNextVar(ushort value){
+        if ((value >= 0x10 && value < 0x17) || value == 0xA1 || value == 0x1E || value == 0x1F){
             return true;
         }
         return false;
     }
 
-    private ushort ifJumpNum(dcpuState state){
+    private static ushort ifJumpNum(dcpuState state){
         ushort amount = 1;
-        ushort addr = state.memory[state.PC + 1];
+        ushort addr = state.memory[state.PC];
         ushort aa = (ushort)((addr >> 10) & 0x3F), bb = (ushort)((addr >> 5) & 0x1F);
         if (needsNextVar(aa))
             amount++;
