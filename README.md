@@ -1,2 +1,2 @@
 # TekDCPU
-a C# implementation of the DCPU in Unity
+an unfinished C# implementation of the DCPU in Unity
